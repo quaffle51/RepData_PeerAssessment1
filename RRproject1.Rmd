@@ -1,0 +1,161 @@
+---
+title: "Reproducible Research - Project 1"
+author: "Quaffle51"
+date: "07/12/2014"
+output: html_document
+---
+
+```{r load libraries,echo=TRUE}
+library(dplyr)
+library(sqldf)
+library(utils)
+library("lattice")
+```
+
+##Load the data
+
+```{r load the data,echo=TRUE,cashe=TRUE}
+setwd("/root/MOOCs/RR/RepData_PeerAssessment1")
+data <- read.csv("activity.csv", header = TRUE)
+```
+
+##Process/transform the data (if necessary) into a format suitable for analysis
+
+```{r class of the columns, echo=TRUE}
+str(data)
+```
+
+We see from the above the date is a factor.  I will change this into a Date class.
+```{r  process/transform dat,echo=TRUE}
+date <- as.Date(data$date)
+df <- tbl_df(data.frame(data$steps, date, data$interval))
+names(df) <- c("steps", "date", "interval")
+str(df)
+```
+
+##Make a histogram of the total number of steps taken each day
+
+```{r histogram, echo=TRUE,cache=TRUE}
+## For this part of the assignment, you can ignore the missing values in the dataset
+dfcc <- df[complete.cases(df),]
+str(dfcc)
+stepsPerDay <- sqldf("SELECT sum(steps) FROM dfcc GROUP BY date")
+names(stepsPerDay) <- c("Steps")
+str(stepsPerDay)
+with(stepsPerDay, hist(Steps,col = "red",xlab="Steps taken per day",breaks = 25))
+```
+
+##Calculate and report the mean and median total number of steps taken per day
+
+```{r mean and median, echo=TRUE}
+f <- function(x) format(round(x,0),digits=9, decimal.mark=".", big.mark=",", small.mark=".", small.interval=3)
+average <- f(mean(stepsPerDay$Steps))
+middle  <- f(median(stepsPerDay$Steps))
+```
+The mean of the number of steps taken per day is **`r average`** and the median of the number of steps taken per day is **`r middle`**.
+
+##What is the average daily activity pattern?
+
+The following code makes a time series plot of the 5-minute interval and the average number of steps taken, averaged across all days.
+
+```{r plot of daily activity of 5 minute intervals,echo=TRUE}
+## Form the data with which to make the plot
+plotData <- sqldf("SELECT interval, avg(steps) FROM dfcc GROUP BY interval")
+names(plotData) <- c("interval", "Steps")
+str(plotData)
+
+## Find the interval having the maximum number of steps
+maxSteps <- sqldf("SELECT interval, max(Steps) FROM plotData")
+names(maxSteps) <- c("interval", "max")
+str(maxSteps)
+
+## Create the plot
+with(plotData, plot(Steps~ interval,type = "l",col="purple",xlab="5-minute interval",ylab="Average number of steps taken",main="Average number of steps taken, averaged across all days"))
+abline(v=maxSteps$interval,col="red")
+text(maxSteps$interval,maxSteps$max, paste0("maximum at (",maxSteps$interval, ",",round(maxSteps$max,1),")"), col = 2, adj = c(-0.1, 0.5))
+```
+
+The  5-minute interval number **`r maxSteps$interval`** , on average across all the days in the dataset, contains the maximum number of steps.
+
+##Imputing missing values
+
+There are a number of days/intervals where there are missing values (coded as NA). The presence of missing days may introduce bias into some calculations or summaries of the data.
+
+**1. Calculate and report the total number of missing values in the dataset (i.e. the total number of rows with NAs)**
+```{r missing values,echo=TRUE}
+missing <- sqldf("SELECT count(*) FROM df WHERE steps is NULL")
+```
+
+The number of missing values in the data set is **`r missing`**.
+
+**2. Devise a strategy for filling in all of the missing values in the dataset.**
+
+The strategy does not need to be sophisticated. For example, you could use the mean/median for that day, or the mean for that 5-minute interval, etc.
+
+__My strategy is as follows.__
+a. If the interval is between    0 and  499, steps <- mean of steps between intervals    0 and  499 for all days.
+b. If the interval is between  500 and  999, steps <- mean of steps between intervals  500 and  999 for all days.
+c. If the interval is between 1000 and 1499, steps <- mean of steps between intervals 1000 and 1499 for all days.
+d. If the interval is between 1500 and 1999, steps <- mean of steps between intervals 1500 and 1999 for all days.
+e. if the interval is between 2000 ane 2499, steps <- mean of steps between intervals 2000 ane 2499 for all days.
+
+This strategy can be achieved through the following code.
+
+```{r strategy,echo=TRUE}
+a <- sqldf("SELECT round(avg(steps),0) as avg FROM dfcc WHERE interval between    0 and  499")
+b <- sqldf("SELECT round(avg(steps),0) as avg FROM dfcc WHERE interval between  500 and  999")
+c <- sqldf("SELECT round(avg(steps),0) as avg FROM dfcc WHERE interval between 1000 and 1499")
+d <- sqldf("SELECT round(avg(steps),0) as avg FROM dfcc WHERE interval between 1500 and 1999")
+e <- sqldf("SELECT round(avg(steps),0) as avg FROM dfcc WHERE interval between 2000 and 2499")
+sapply(c(a,b,c,d,e), function(index) index)
+```
+
+**3. Create a new dataset that is equal to the original dataset but with the missing data filled in.**
+
+```{r update, echo=TRUE}
+s <- function(x,min,max) sprintf("update df set steps = %d WHERE steps is NULL and interval between %d and %d", x$avg, min, max)
+df <- sqldf(c(s(a,   0, 499),"SELECT * FROM main.df"))
+df <- sqldf(c(s(b, 500, 999),"SELECT * FROM main.df"))
+df <- sqldf(c(s(c,1000,1499),"SELECT * FROM main.df"))
+df <- sqldf(c(s(d,1500,1999),"SELECT * FROM main.df"))
+df <- sqldf(c(s(e,2000,2499),"SELECT * FROM main.df"))
+```
+
+4. **Make a histogram of the total number of steps taken each day and calculate and report the mean and median total number of steps taken per day.**
+
+Do these values differ FROM the estimates from the first part of the assignment? What is the impact of imputing missing data on the estimates of the total daily number of steps?
+
+```{r histogram2, echo=TRUE}
+stepsPerDay <- sqldf("SELECT sum(steps) FROM df GROUP BY date")
+names(stepsPerDay) <- c("Steps")
+str(stepsPerDay)
+with(stepsPerDay, hist(Steps,col = "red",xlab="Steps taken per day",breaks = 25))
+```
+
+
+```{r mean and median again, echo=TRUE}
+average1 <- f(mean(stepsPerDay$Steps))
+middle1  <- f(median(stepsPerDay$Steps))
+```
+The mean of the number of steps taken per day is **`r average`** and the median of the number of steps taken per day is **`r middle`**.
+
+So, the original mean of the data ignoring NA's gave a mean of `r average` and this can be compared with the mean of the data with NA's substituted as outline above of `r average1`.  These means are quite close together.  The median of the original data was `r middle` and this can be compared to the median with NA's substituted for numeric values of `r middle1`.  These two median values are quite close together.  So the strategy I have adopted seems to be a reasonable one.
+
+##Are there differences in activity patterns between weekdays and weekends?
+
+1. Create a new factor variable in the dataset with two levels - "weekday" and "weekend"" indicating whether a given date is a weekday or weekend day.
+
+```{r weekdays, echo=TRUE}
+df$wkdayend <- as.factor(ifelse(weekdays(df$date) %in% c("Saturday","Sunday"),"weekend", "weekday"))
+df1 <- sqldf("SELECT interval, avg(steps) as avgsteps, wkdayend FROM df GROUP BY wkdayend, interval")
+str(df1)
+```
+
+2. Make a panel plot containing a time series plot (i.e. type = "l") of the 5-minute interval (x-axis) and the average number of steps taken, averaged across all weekday days or weekend days (y-axis).
+
+```{r panel plot,echo=TRUE}
+xyplot(avgsteps ~ interval | factor(wkdayend), data=df1,  grid = TRUE,layout=c(1,2),type = 'l',ylab="Number of Steps",
+       xlab="Interval",
+       main="Average number of Steps Taken against Interval")
+       
+```
